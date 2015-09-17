@@ -40,10 +40,14 @@ Unless otherwise noted, the ideal gas equation of state is used:
 # ============================================================================
 
 import numpy as np
+import time
 
 num_eqn = 3
 
 def euler_roe_1D(q_l,q_r,aux_l,aux_r,problem_data):
+    return euler_roe_1D(q_l,q_r,aux_l,aux_r,problem_data['gamma1'],problem_data['efix'])
+
+def euler_roe_1D(q_l,q_r,aux_l,aux_r,gamma1,efix):
     r"""
     Roe Euler solver in 1d
     
@@ -66,12 +70,11 @@ def euler_roe_1D(q_l,q_r,aux_l,aux_r,problem_data):
     s = np.empty( (num_waves, num_rp) )
     amdq = np.zeros( (num_eqn, num_rp) )
     apdq = np.zeros( (num_eqn, num_rp) )
-    
-    # Solver parameters
-    gamma1 = problem_data['gamma1']
 
     # Calculate Roe averages
-    u, a, enthalpy = roe_averages(q_l,q_r,problem_data)[0:3]
+    t1 = time.time()
+    u, a, enthalpy = roe_averages(q_l,q_r,gamma1)[0:3]
+    roe_time = time.time() - t1
 
     # Find eigenvector coefficients
     delta = q_r - q_l
@@ -96,7 +99,7 @@ def euler_roe_1D(q_l,q_r,aux_l,aux_r,problem_data):
     s[2,...] = u + a
     
     # Entropy fix
-    if problem_data['efix']:
+    if efix:
         raise NotImplementedError("Entropy fix has not been implemented!")
     else:
         # Godunov update
@@ -108,7 +111,7 @@ def euler_roe_1D(q_l,q_r,aux_l,aux_r,problem_data):
                 apdq[m,:] += np.max(s_index,axis=0) * wave[m,mw,:]
     
 
-    return wave,s,amdq,apdq
+    return wave,s,amdq,apdq,roe_time
 
 def euler_hll_1D(q_l,q_r,aux_l,aux_r,problem_data):
     r"""
@@ -193,10 +196,7 @@ def euler_exact_1D(q_l,q_r,aux_l,aux_r,problem_data):
     """
     raise NotImplementedError("The exact Riemann solver has not been implemented.")
 
-def roe_averages(q_l,q_r,problem_data):
-    # Solver parameters
-    gamma1 = problem_data['gamma1']
-
+def roe_averages(q_l,q_r,gamma1):
     # Calculate Roe averages
     rhsqrtl = np.sqrt(q_l[0,...])
     rhsqrtr = np.sqrt(q_r[0,...])
