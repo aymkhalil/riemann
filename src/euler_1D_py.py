@@ -46,7 +46,7 @@ import time
 
 num_eqn = 3
 
-@numba.jit(nopython=False)
+#@numba.jit(nopython=False)
 def euler_roe_1D(q_l,q_l0, q_l1, q_l2, q_r, q_r0, q_r1, q_r2,delta, aux_l,aux_r,gamma1, efix):
     r"""
     Roe Euler solver in 1d
@@ -124,16 +124,30 @@ def euler_roe_1D(q_l,q_l0, q_l1, q_l2, q_r, q_r0, q_r1, q_r2,delta, aux_l,aux_r,
     if efix:
         raise NotImplementedError("Entropy fix has not been implemented!")
     else:
-        # Godunov update
-        s_index = np.zeros((2,num_rp))
-        for m in xrange(num_eqn):
-            for mw in xrange(num_waves):
-                s_index[0,:] = s[mw,:]
-                amdq[m,:] += np.min(s_index,axis=0) * wave[m,mw,:]
-                apdq[m,:] += np.max(s_index,axis=0) * wave[m,mw,:]
-
+        godunov_update(num_rp, num_eqn, num_waves, amdq, apdq, wave, s)
 
     return wave, s, amdq, apdq, roe_time
+
+@numba.jit(nopython=True)
+def godunov_update(num_rp, num_eqn, num_waves, amdq, apdq, wave, s):
+    # Godunov update
+    s_index = np.zeros((2,num_rp))
+    for m in xrange(num_eqn):
+        for mw in xrange(num_waves):
+            # s_index[0,:] = s[mw,:]
+            for i in range(s_index.shape[1]):
+                s_index[0, i] = s[mw,i]
+
+            # amdq[m,:] += np.min(s_index,axis=0) * wave[m,mw,:]
+            # apdq[m,:] += np.max(s_index,axis=0) * wave[m,mw,:]
+            for j in range(wave.shape[2]):
+                min_val = max_val = s_index[0, j]
+                for k in range(1, s_index.shape[0]):
+                     min_val = min(min_val, s_index[k,j])
+                     max_val = max(max_val, s_index[k,j])
+
+                amdq[m,j] += min_val * wave[m,mw,j]
+                apdq[m,j] += max_val * wave[m,mw,j]
 
 def euler_hll_1D(q_l,q_r,aux_l,aux_r,problem_data):
     r"""
