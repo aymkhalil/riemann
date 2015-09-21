@@ -41,13 +41,14 @@ Unless otherwise noted, the ideal gas equation of state is used:
 
 import numpy as np
 import numba
+from math import sqrt
 import time
 
 
 num_eqn = 3
+use_numba = True
 
-#@numba.jit(nopython=False)
-def euler_roe_1D(q_l,q_l0, q_l1, q_l2, q_r, q_r0, q_r1, q_r2,delta, aux_l,aux_r,gamma1, efix):
+def euler_roe_1D(q_l, q_r, aux_l, aux_r, gamma1, efix):
     r"""
     Roe Euler solver in 1d
 
@@ -65,72 +66,27 @@ def euler_roe_1D(q_l,q_l0, q_l1, q_l2, q_r, q_r0, q_r1, q_r2,delta, aux_l,aux_r,
     num_rp = q_l.shape[1]
     num_waves = 3
 
-    # Return values
-    wave = np.empty( (num_eqn, num_waves, num_rp) )
-    s = np.empty( (num_waves, num_rp) )
-    amdq = np.zeros( (num_eqn, num_rp) )
-    apdq = np.zeros( (num_eqn, num_rp) )
-
-    # Solver parameters
-    #gamma1 = problem_data['gamma1']
-
     # Calculate Roe averages
-    #q_l = np.linspace(1, 1000, 15009).reshape(3, 5003)
-    #q_l[0,:] = np.require(q_l[0,:], requirements=['C'])
-    #q_l[1,:] = np.require(q_l[1,:], requirements=['C'])
-    #q_l[2,:] = np.require(q_l[2,:], requirements=['C'])
-    #q_l = np.require(q_l, requirements=['C'])
-    #q_l = np.ascontiguousarray(q_l)
-    #q_r[0,:] = np.require(q_r[0,:], requirements=['C'])
-    #q_r[1,:] = np.require(q_r[1,:], requirements=['C'])
-    #q_r[2,:] = np.require(q_r[2,:], requirements=['C'])
-    #q_r = np.require(q_r, requirements=['C'])
-    #q_r = np.ascontiguousarray(q_r)
-
-    t1 = time.time()
-    u, a, enthalpy = roe_averages(q_l0, q_l1, q_l2,q_r0, q_r1, q_r2,gamma1)[0:3]
-    roe_time = time.time() - t1
+    u, a, enthalpy = roe_averages(q_l, q_r, gamma1)[0:3]
     # Find eigenvector coefficients
-    #delta = q_r - q_l
-
-    a2 = gamma1 / a**2 * ((enthalpy -u**2)*delta[0,:] + u*delta[1,:] - delta[2,:])
-
-    #logging.info('contiguous = ' + str(a2.flags.contiguous))
-    #logging.info('c_contiguous = ' + str(a2.flags.c_contiguous))
-    #logging.info('f_contiguous = ' + str(a2.flags.f_contiguous))
-
-    #sys.exit()
-
-    a3 = (delta[1,:] + (a-u) * delta[0,:] - a*a2) / (2.0*a)
-    a1 = delta[0,:] - a2 - a3
+    a1, a2, a3 = compute_eigenvector_coeff(q_l, q_r, a, u, enthalpy, gamma1)
 
     # Compute the waves
-    wave[0,0,:] = a1
-    wave[1,0,:] = a1 * (u-a)
-    wave[2,0,:] = a1 * (enthalpy - u*a)
-    s[0,:] = u - a
-
-    wave[0,1,:] = a2
-    wave[1,1,:] = a2 * u
-    wave[2,1,:] = a2 * 0.5 * u**2
-    s[1,:] = u
-
-    wave[0,2,:] = a3
-    wave[1,2,:] = a3 * (u+a)
-    wave[2,2,:] = a3 * (enthalpy + u*a)
-    s[2,:] = u + a
+    wave, s = compute_waves(a, a1, a2, a3, enthalpy, u, num_waves, num_rp)
 
     # Entropy fix
     if efix:
         raise NotImplementedError("Entropy fix has not been implemented!")
     else:
-        godunov_update(num_rp, num_eqn, num_waves, amdq, apdq, wave, s)
+        amdq, apdq = godunov_update(num_rp, num_eqn, num_waves, wave, s)
 
-    return wave, s, amdq, apdq, roe_time
+    return wave, s, amdq, apdq
 
-@numba.jit(nopython=True)
-def godunov_update(num_rp, num_eqn, num_waves, amdq, apdq, wave, s):
+@numba.jit(nopython=True, cache=True)
+def godunov_update_compiled(num_rp, num_eqn, num_waves, wave, s):
     # Godunov update
+    amdq = np.zeros((num_eqn, num_rp))
+    apdq = np.zeros((num_eqn, num_rp))
     s_index = np.zeros((2,num_rp))
     for m in xrange(num_eqn):
         for mw in xrange(num_waves):
@@ -148,6 +104,53 @@ def godunov_update(num_rp, num_eqn, num_waves, amdq, apdq, wave, s):
 
                 amdq[m,j] += min_val * wave[m,mw,j]
                 apdq[m,j] += max_val * wave[m,mw,j]
+
+    return amdq, apdq
+
+def godunov_update(num_rp, num_eqn, num_waves, wave, s):
+    if use_numba: return godunov_update_compiled(num_rp, num_eqn, num_waves, wave, s)
+
+    # Godunov update
+    amdq = np.zeros( (num_eqn, num_rp) )
+    apdq = np.zeros( (num_eqn, num_rp) )
+    s_index = np.zeros((2,num_rp))
+    for m in xrange(num_eqn):
+        for mw in xrange(num_waves):
+            s_index[0,:] = s[mw,:]
+            amdq[m,:] += np.min(s_index,axis=0) * wave[m,mw,:]
+            apdq[m,:] += np.max(s_index,axis=0) * wave[m,mw,:]
+
+    return amdq, apdq
+
+def compute_waves(a, a1, a2, a3, enthalpy, u, num_waves, num_rp):
+    wave = np.empty( (num_eqn, num_waves, num_rp) )
+    s = np.empty( (num_waves, num_rp) )
+
+    wave[0,0,:] = a1
+    wave[1,0,:] = a1 * (u-a)
+    wave[2,0,:] = a1 * (enthalpy - u*a)
+    s[0,:] = u - a
+
+    wave[0,1,:] = a2
+    wave[1,1,:] = a2 * u
+    wave[2,1,:] = a2 * 0.5 * u**2
+    s[1,:] = u
+
+    wave[0,2,:] = a3
+    wave[1,2,:] = a3 * (u+a)
+    wave[2,2,:] = a3 * (enthalpy + u*a)
+    s[2,:] = u + a
+
+    return wave, s
+
+def compute_eigenvector_coeff(q_l, q_r, a, u, enthalpy, gamma1):
+    delta = q_r - q_l
+
+    a2 = gamma1 / a**2 * ((enthalpy -u**2)*delta[0,:] + u*delta[1,:] - delta[2,:])
+    a3 = (delta[1,:] + (a-u) * delta[0,:] - a*a2) / (2.0*a)
+    a1 = delta[0,:] - a2 - a3
+
+    return a1, a2, a3
 
 def euler_hll_1D(q_l,q_r,aux_l,aux_r,problem_data):
     r"""
@@ -236,20 +239,56 @@ def euler_exact_1D(q_l,q_r,aux_l,aux_r,problem_data):
 def roe_averages(q_l,q_r,problem_data):
     return roe_averages(q_l, q_r, problem_data['gamma1'])
 
-@numba.jit(nopython=True)
-def roe_averages(q_l0, q_l1, q_l2,q_r0, q_r1, q_r2,gamma1):
-    # Solver parameters
-    #gamma1 = problem_data['gamma1']
-    # Calculate Roe averages
-    rhsqrtl = np.sqrt(q_l0)
-    rhsqrtr = np.sqrt(q_r0)
-    pl = gamma1 * (q_l2 - 0.5 * (q_l1**2) / q_l0)
-    pr = gamma1 * (q_r2 - 0.5 * (q_r1**2) / q_r0)
+@numba.jit(nopython=True, cache=True)
+def roe_averages_compiled(q_l, q_r, gamma1):
+    #The current Numba version doesn't support non contiguous layouts 
+    q_l0 = np.empty(q_l.shape[1], dtype=np.float64)
+    q_l1 = np.empty(q_l.shape[1], dtype=np.float64)
+    q_l2 = np.empty(q_l.shape[1], dtype=np.float64)
+    pl = np.empty(q_l.shape[1], dtype=np.float64)
+    rhsqrtl = np.empty(q_l.shape[1], dtype=np.float64)
+    rhsqrtr = np.empty(q_l.shape[1], dtype=np.float64)
+    rhsq2 = np.empty(q_l.shape[1], dtype=np.float64)
+    u = np.empty(q_l.shape[1], dtype=np.float64)
+    enthalpy = np.empty(q_l.shape[1], dtype=np.float64)
+    a = np.empty(q_l.shape[1], dtype=np.float64)
+
+    q_r0 = np.empty(q_r.shape[1], dtype=np.float64)
+    q_r1 = np.empty(q_r.shape[1], dtype=np.float64)
+    q_r2 = np.empty(q_r.shape[1], dtype=np.float64)
+    pr = np.empty(q_r.shape[1], dtype=np.float64)
+
+    for i in xrange(q_l.shape[1]):
+        q_l0[i] = q_l[0,i]
+        q_l1[i] = q_l[1,i]
+        q_l2[i] = q_l[2,i]
+
+        q_r0[i] = q_r[0,i]
+        q_r1[i] = q_r[1,i]
+        q_r2[i] = q_r[2,i]
+
+        rhsqrtl[i] = sqrt(q_l0[i])
+        rhsqrtr[i] = sqrt(q_r0[i])
+        rhsq2[i] = rhsqrtl[i] + rhsqrtr[i]
+        pl[i] = gamma1 * (q_l2[i] - 0.5 * (q_l1[i] ** 2) / q_l0[i])
+        pr[i] = gamma1 * (q_r2[i] - 0.5 * (q_r1[i] ** 2) / q_r0[i])
+        u[i] = (q_l1[i] / rhsqrtl[i] + q_r1[i] / rhsqrtr[i]) / rhsq2[i]
+        enthalpy[i] = ((q_l2[i] + pl[i]) / rhsqrtl[i] + (q_r2[i] + pr[i]) / rhsqrtr[i]) / rhsq2[i]
+        a[i] = sqrt(gamma1 * (enthalpy[i] - 0.5 * u[i] ** 2))
+
+    return u, a, enthalpy, pl, pr
+
+def roe_averages(q_l, q_r, gamma1):
+    if use_numba: return roe_averages_compiled(q_l, q_r, gamma1)
+
+    # Calculate Roe averages 
+    rhsqrtl = np.sqrt(q_l[0,...])
+    rhsqrtr = np.sqrt(q_r[0,...])
+    pl = gamma1 * (q_l[2,...] - 0.5 * (q_l[1,...]**2) / q_l[0,...])
+    pr = gamma1 * (q_r[2,...] - 0.5 * (q_r[1,...]**2) / q_r[0,...])
     rhsq2 = rhsqrtl + rhsqrtr
-    u = (q_l1 / rhsqrtl + q_r1 / rhsqrtr) / rhsq2
-    enthalpy = ((q_l2 + pl) / rhsqrtl + (q_r2 + pr) / rhsqrtr) / rhsq2
+    u = (q_l[1,...] / rhsqrtl + q_r[1,...] / rhsqrtr) / rhsq2
+    enthalpy = ((q_l[2,...] + pl) / rhsqrtl + (q_r[2,...] + pr) / rhsqrtr) / rhsq2
     a = np.sqrt(gamma1 * (enthalpy - 0.5 * u**2))
-    #import IPython
-    #IPython.embed()
 
     return u, a, enthalpy, pl, pr
