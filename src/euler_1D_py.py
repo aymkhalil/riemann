@@ -91,14 +91,14 @@ def godunov_update_compiled(num_rp, num_eqn, num_waves, wave, s):
     for m in xrange(num_eqn):
         for mw in xrange(num_waves):
             # s_index[0,:] = s[mw,:]
-            for i in range(s_index.shape[1]):
+            for i in xrange(s_index.shape[1]):
                 s_index[0, i] = s[mw,i]
 
             # amdq[m,:] += np.min(s_index,axis=0) * wave[m,mw,:]
             # apdq[m,:] += np.max(s_index,axis=0) * wave[m,mw,:]
-            for j in range(wave.shape[2]):
+            for j in xrange(wave.shape[2]):
                 min_val = max_val = s_index[0, j]
-                for k in range(1, s_index.shape[0]):
+                for k in xrange(1, s_index.shape[0]):
                      min_val = min(min_val, s_index[k,j])
                      max_val = max(max_val, s_index[k,j])
 
@@ -241,39 +241,20 @@ def roe_averages(q_l,q_r,problem_data):
 
 @numba.jit(nopython=True, cache=True)
 def roe_averages_compiled(q_l, q_r, gamma1):
-    #The current Numba version doesn't support non contiguous layouts 
-    q_l0 = np.empty(q_l.shape[1], dtype=np.float64)
-    q_l1 = np.empty(q_l.shape[1], dtype=np.float64)
-    q_l2 = np.empty(q_l.shape[1], dtype=np.float64)
     pl = np.empty(q_l.shape[1], dtype=np.float64)
-    rhsqrtl = np.empty(q_l.shape[1], dtype=np.float64)
-    rhsqrtr = np.empty(q_l.shape[1], dtype=np.float64)
-    rhsq2 = np.empty(q_l.shape[1], dtype=np.float64)
     u = np.empty(q_l.shape[1], dtype=np.float64)
     enthalpy = np.empty(q_l.shape[1], dtype=np.float64)
     a = np.empty(q_l.shape[1], dtype=np.float64)
-
-    q_r0 = np.empty(q_r.shape[1], dtype=np.float64)
-    q_r1 = np.empty(q_r.shape[1], dtype=np.float64)
-    q_r2 = np.empty(q_r.shape[1], dtype=np.float64)
     pr = np.empty(q_r.shape[1], dtype=np.float64)
 
     for i in xrange(q_l.shape[1]):
-        q_l0[i] = q_l[0,i]
-        q_l1[i] = q_l[1,i]
-        q_l2[i] = q_l[2,i]
-
-        q_r0[i] = q_r[0,i]
-        q_r1[i] = q_r[1,i]
-        q_r2[i] = q_r[2,i]
-
-        rhsqrtl[i] = sqrt(q_l0[i])
-        rhsqrtr[i] = sqrt(q_r0[i])
-        rhsq2[i] = rhsqrtl[i] + rhsqrtr[i]
-        pl[i] = gamma1 * (q_l2[i] - 0.5 * (q_l1[i] ** 2) / q_l0[i])
-        pr[i] = gamma1 * (q_r2[i] - 0.5 * (q_r1[i] ** 2) / q_r0[i])
-        u[i] = (q_l1[i] / rhsqrtl[i] + q_r1[i] / rhsqrtr[i]) / rhsq2[i]
-        enthalpy[i] = ((q_l2[i] + pl[i]) / rhsqrtl[i] + (q_r2[i] + pr[i]) / rhsqrtr[i]) / rhsq2[i]
+        rhsqrtl = sqrt(q_l[0, i])
+        rhsqrtr = sqrt(q_r[0, i])
+        rhsq2 = rhsqrtl + rhsqrtr
+        pl[i] = gamma1 * (q_l[2, i] - 0.5 * (q_l[1, i] ** 2) / q_l[0, i])
+        pr[i] = gamma1 * (q_r[2, i] - 0.5 * (q_r[1, i] ** 2) / q_r[0, i])
+        u[i] = (q_l[1, i] / rhsqrtl + q_r[1, i] / rhsqrtr) / rhsq2
+        enthalpy[i] = ((q_l[2, i] + pl[i]) / rhsqrtl + (q_r[2, i] + pr[i]) / rhsqrtr) / rhsq2
         a[i] = sqrt(gamma1 * (enthalpy[i] - 0.5 * u[i] ** 2))
 
     return u, a, enthalpy, pl, pr
