@@ -40,7 +40,6 @@ Unless otherwise noted, the ideal gas equation of state is used:
 # ============================================================================
 
 import numpy as np
-import time
 
 num_eqn = 3
 
@@ -72,9 +71,7 @@ def euler_roe_1D(q_l,q_r,aux_l,aux_r,gamma1,efix):
     apdq = np.zeros( (num_eqn, num_rp) )
 
     # Calculate Roe averages
-    t1 = time.time()
     u, a, enthalpy = roe_averages(q_l,q_r,gamma1)[0:3]
-    roe_time = time.time() - t1
 
     # Find eigenvector coefficients
     delta = q_r - q_l
@@ -111,7 +108,7 @@ def euler_roe_1D(q_l,q_r,aux_l,aux_r,gamma1,efix):
                 apdq[m,:] += np.max(s_index,axis=0) * wave[m,mw,:]
     
 
-    return wave,s,amdq,apdq,roe_time
+    return wave,s,amdq,apdq
 
 def euler_hll_1D(q_l,q_r,aux_l,aux_r,problem_data):
     r"""

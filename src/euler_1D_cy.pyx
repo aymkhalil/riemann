@@ -43,7 +43,6 @@ import numpy as np
 import cython
 cimport numpy as np
 from libc.math cimport sqrt
-import time
 
 cdef unsigned int num_eqn = 3
 @cython.boundscheck(False) # turn of bounds-checking for entire function
@@ -73,12 +72,10 @@ def euler_roe_1D(np.ndarray[np.float64_t, ndim = 2] q_l,np.ndarray[np.float64_t,
     cdef np.ndarray[np.float64_t, ndim=2] apdq = np.zeros( (num_eqn, num_rp), dtype=np.float64)
 
     # Calculate Roe averages
-    cdef double t1 = time.time()
     cdef np.ndarray[np.float64_t, ndim=1] u, a, enthalpy
     cdef np.ndarray[np.float64_t, ndim=2] delta = np.empty([3, num_rp], dtype=np.float64 )
 
     u, a, enthalpy = roe_averages(q_l,q_r,gamma1)[0:3]
-    cdef double roe_time = time.time() - t1
 
     # Find eigenvector coefficients
     cdef unsigned int x = 0
@@ -160,7 +157,7 @@ def euler_roe_1D(np.ndarray[np.float64_t, ndim = 2] q_l,np.ndarray[np.float64_t,
         # Godunov update
         godunov_update2(num_rp, num_eqn, num_waves, amdq, apdq, wave, s)
 
-    return wave,s,amdq,apdq,roe_time
+    return wave,s,amdq,apdq
 
 def godunov_update1(int num_rp, int num_eqn, int num_waves, np.ndarray[np.float64_t, ndim=2] amdq, np.ndarray[np.float64_t, ndim=2] apdq, np.ndarray[np.float64_t, ndim=3] wave, np.ndarray[np.float64_t, ndim=2] s):
     # Godunov update
